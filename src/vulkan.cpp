@@ -94,6 +94,7 @@ static std::vector<char> readFile(const std::string& filename) {
 Vulkan::Vulkan(){
   windowWidth=800;
   windowHeight=600;
+  rInfo.samplesPerPixel = 4;
 }
 
 Vulkan::~Vulkan(){
@@ -134,6 +135,8 @@ void Vulkan::initVulkan(){
   
   createStorageImage();
   createStorageImageView();
+  
+  createUniformBuffer();
 
   createCommandPool();
 
@@ -162,6 +165,9 @@ void Vulkan::cleanup(){
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
   vkDestroyCommandPool(device, commandPool, nullptr);
   
+  vkFreeMemory(device, uniformBufferMemory, nullptr);
+  vkDestroyBuffer(device, uniformBuffer, nullptr);
+
   vkFreeMemory(device, storageImageMemory, nullptr);
   vkDestroyImage(device, storageImage, nullptr);
   vkDestroyImageView(device, storageImageView, nullptr);
@@ -580,6 +586,38 @@ void Vulkan::createStorageImageView(){
   }
 }
 
+void Vulkan::createUniformBuffer(){
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size = sizeof(rInfo);
+  bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if(vkCreateBuffer(device, &bufferInfo, nullptr, &uniformBuffer) != VK_SUCCESS){
+    throw std::runtime_error("failed to create uniformBuffer!");
+  }
+
+  VkMemoryRequirements memReq;
+  vkGetBufferMemoryRequirements(device, uniformBuffer, &memReq);
+
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memReq.size;
+  allocInfo.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+  if(vkAllocateMemory(device, &allocInfo, nullptr, &uniformBufferMemory) != VK_SUCCESS){
+    throw std::runtime_error("Failed to allocate uniform buffer memory");
+  }
+  if(vkBindBufferMemory(device, uniformBuffer, uniformBufferMemory, 0) != VK_SUCCESS){
+    throw std::runtime_error("Failed to bind uniform buffer memory");
+  }
+    
+  void* data;
+  vkMapMemory(device, uniformBufferMemory, 0, sizeof(rInfo), 0, &data);
+  memcpy(data, &rInfo, sizeof(rInfo));
+  vkUnmapMemory(device, uniformBufferMemory);
+}
+
 VkShaderModule Vulkan::createShaderModule(const std::vector<char>& code) {
   VkShaderModuleCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -624,17 +662,23 @@ void Vulkan::createDescriptorSetLayout(){
   layoutInfo.bindingCount = 2;
   layoutInfo.pBindings = layoutBindings.data();*/
   
-  VkDescriptorSetLayoutBinding layoutBinding{};
-  layoutBinding.binding = 0;
-  layoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  layoutBinding.pImmutableSamplers = nullptr;
-  layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  layoutBinding.descriptorCount = 1;
+  std::array<VkDescriptorSetLayoutBinding, 2> layoutBindings{};
+  layoutBindings[0].binding = 0;
+  layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  layoutBindings[0].pImmutableSamplers = nullptr;
+  layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  layoutBindings[0].descriptorCount = 1;
+
+  layoutBindings[1].binding = 1;
+  layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  layoutBindings[1].pImmutableSamplers = nullptr;
+  layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  layoutBindings[1].descriptorCount = 1;
   
   VkDescriptorSetLayoutCreateInfo layoutInfo{};
   layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  layoutInfo.bindingCount = 1;
-  layoutInfo.pBindings = &layoutBinding;
+  layoutInfo.bindingCount = 2;
+  layoutInfo.pBindings = layoutBindings.data();
 
   if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
     throw std::runtime_error("failed to create compute descriptor set layout!");
@@ -649,14 +693,17 @@ void Vulkan::createDescriptorPool(){
   poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   poolSizes[1].descriptorCount = 1;*/
 
-  VkDescriptorPoolSize poolSizes{};
-  poolSizes.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  poolSizes.descriptorCount = 1;
+  std::array<VkDescriptorPoolSize, 2> poolSizes{};
+  poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  poolSizes[0].descriptorCount = 1;
+  
+  poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  poolSizes[1].descriptorCount = 1;
 
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.poolSizeCount = 1; //static_cast<uint32_t>(poolSizes.size());
-  poolInfo.pPoolSizes = &poolSizes;
+  poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+  poolInfo.pPoolSizes = poolSizes.data();
   poolInfo.maxSets = 1;
 
   if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
@@ -679,16 +726,29 @@ void Vulkan::createDescriptorSet(){
   imageInfo.imageView = storageImageView; 
   imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-  VkWriteDescriptorSet descriptorWrite{};
-  descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  descriptorWrite.dstSet = descriptorSet;
-  descriptorWrite.dstBinding = 0;
-  descriptorWrite.dstArrayElement = 0;
-  descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  descriptorWrite.descriptorCount = 1;
-  descriptorWrite.pImageInfo = &imageInfo;
+  VkDescriptorBufferInfo bufferInfo{};
+  bufferInfo.buffer = uniformBuffer;
+  bufferInfo.offset = 0;
+  bufferInfo.range = sizeof(rInfo);
 
-  vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+  std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+  descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  descriptorWrites[0].dstSet = descriptorSet;
+  descriptorWrites[0].dstBinding = 0;
+  descriptorWrites[0].dstArrayElement = 0;
+  descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  descriptorWrites[0].descriptorCount = 1;
+  descriptorWrites[0].pImageInfo = &imageInfo;
+  
+  descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  descriptorWrites[1].dstSet = descriptorSet;
+  descriptorWrites[1].dstBinding = 1;
+  descriptorWrites[1].dstArrayElement = 0;
+  descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  descriptorWrites[1].descriptorCount = 1;
+  descriptorWrites[1].pBufferInfo = &bufferInfo;
+
+  vkUpdateDescriptorSets(device, 2, descriptorWrites.data(), 0, nullptr);
 }
 
 void Vulkan::createPipelineLayout(){
@@ -780,7 +840,7 @@ void Vulkan::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIn
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-  vkCmdDispatch(commandBuffer, (windowWidth + 15) / 16, (windowHeight + 15) / 16, 1);
+  vkCmdDispatch(commandBuffer, (windowWidth + 15) / 16, (windowHeight + 7) / 8, 1);
  
   //storageImage to transfer src
   //swapChainImage to transfer dst

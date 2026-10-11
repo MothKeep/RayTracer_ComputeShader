@@ -15,6 +15,8 @@
 #include <limits> 
 #include <algorithm> 
 
+#include "utility.h"
+
 #define COMPUTE_SHADER_PATH "shaders/compute.spv"
 //vulkan utility
 struct QueueFamilyIndices {
@@ -72,6 +74,10 @@ class Vulkan{
     VkImage storageImage;
     VkDeviceMemory storageImageMemory;
     VkImageView storageImageView;
+
+    renderCallInfo rInfo;
+    VkDeviceMemory uniformBufferMemory;
+    VkBuffer uniformBuffer;
     
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
@@ -89,7 +95,6 @@ class Vulkan{
     VkFence fence;
     VkSemaphore imageAvailableSemaphore;
     VkSemaphore renderFinishedSemaphore;
-
     
 
     //functions
@@ -111,12 +116,14 @@ class Vulkan{
     VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
     void createSwapChain();
-
     void createImageView();
 
     void createStorageImage();
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void createStorageImageView();
+
+    void createUniformBuffer();
+    void updateUniformBuffer();
 
     VkShaderModule createShaderModule(const std::vector<char>& code);
 
@@ -135,7 +142,7 @@ class Vulkan{
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
     VkImageMemoryBarrier getImagePipelineBarrier(
-        const VkAccessFlags &srcAccessFlags, const VkAccessFlagBits &dstAccessFlags,
+        const VkAccessFlags &srcAccessFlags, const VkAccessFlags &dstAccessFlags,
         const VkImageLayout &oldLayout, const VkImageLayout &newLayout,
         const VkImage &image);
     void render();
