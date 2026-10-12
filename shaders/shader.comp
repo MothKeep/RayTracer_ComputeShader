@@ -1,4 +1,10 @@
 #version 450
+
+struct Sphere{
+  vec3 center;
+  float radius;
+};
+
 //--------
 //bindings
 //--------
@@ -10,6 +16,10 @@ layout(binding = 1) uniform RenderCallInfo{
   uint samplesPerPixel;
 }renderCallInfo;
 
+layout(binding = 2) uniform SceneInfo{
+  uint spheresTotal;
+  Sphere spheres[100];
+}sceneInfo;
 
 //-------
 //structs
@@ -39,20 +49,47 @@ struct Camera{
   vec3 up;
 };
 
+struct HitRecord{
+  bool doesHit;
+  vec3 hitPoint;
+  vec3 outNormal;
+  float t;
+};
+
+struct ScatterRecord{
+  bool doesScatter;
+  vec3 direction;
+};
 
 //---------------------
 //function declarations
 //---------------------
 void initViewport(vec2 imgSize, float focalLength);
 Ray getRay(float u, float v);
+vec3 rayAt(Ray ray, float t);
+
 vec3 rayColor(Ray ray);
+vec3 skyColor(Ray ray);
+
+HitRecord worldHit(inout Ray r, float tMin);
+HitRecord hitSphere(Sphere sphere, Ray ray, float tMin, float tMax);
+ScatterRecord scatter(HitRecord hitRecord, Ray ray);
+
+bool isVectorNearZero(vec3 vec);
+
+uint hash(uint x);
+float random();
+float randomInInterval(float min, float max);
+vec3 randomVector(float min, float max);
+vec3 randomUnitVector();
 
 //---------
 //constants
 //---------
-Camera cam = Camera(90.0, vec3(0,0,0), vec3(0,0,1), vec3(0,1,0));
+Camera cam = Camera(80.0, vec3(-3, 2, -13), vec3(0,0,0), vec3(0,1,0));
 Viewport viewport;
 const uint maxDepth = 50;
+const float maxDistance = 10000.0f;
 
 //----
 //main
@@ -61,7 +98,7 @@ void main(){
   //"global"
   const vec2 imgSize = vec2(imageSize(outputImage));
   const float aspectRatio = imgSize.x / imgSize.y;
-  initViewport(imgSize, 1.0);
+  initViewport(imgSize, 2.0);
   
   const uint samplesRoot = uint(sqrt(float(renderCallInfo.samplesPerPixel)));
   const uint samplesPerPixel = samplesRoot * samplesRoot;
@@ -91,8 +128,8 @@ void initViewport(vec2 imgSize, float focalLength){
   viewport.height = 2.0f * tan(radians(cam.fov) * 0.5);
   viewport.width = viewport.height * imgSize.x / imgSize.y;
   viewport.camForward = normalize(cam.lookAt - cam.lookFrom);
-  viewport.camUp = normalize(cam.up);
-  viewport.camLeft = normalize(cross(viewport.camUp, viewport.camForward));
+  viewport.camLeft = normalize(cross(viewport.camForward, cam.up));
+  viewport.camUp = normalize(cross(viewport.camLeft, viewport.camForward));
   
   viewport.horizontal = -viewport.camLeft * viewport.width;
   viewport.vertical = -viewport.camUp * viewport.height;
@@ -109,9 +146,140 @@ Ray getRay(float u, float v){
   return ray;
 }
 
+vec3 rayAt(Ray ray, float t){
+  return ray.origin + t * ray.direction;
+}
+
 vec3 rayColor(Ray ray){
+  vec3 color = vec3(1.0, 1.0, 1.0);
+
+  for(uint i=0; i<maxDepth; i++){
+    HitRecord hitRecord = worldHit(ray, 0.01);
+    
+    if(!hitRecord.doesHit){
+      color = color * skyColor(ray);
+      break;
+    }
+
+    ScatterRecord scatterRecord = scatter(hitRecord, ray);
+    ray.origin = hitRecord.hitPoint;
+    ray.direction = scatterRecord.direction;
+    color = color * 0.7 * vec3(0.5, 0.7, 1.0);
+  }
+
+  return color;
+}
+
+vec3 skyColor(Ray ray){
   vec3 v = ray.direction;
   float t = 0.5 * (v.y + 1.0);
 
   return mix(vec3(1.0), vec3(0.3, 0.5, 1.0), t);
+}
+
+HitRecord worldHit(inout Ray ray, float tMin){
+  HitRecord final;
+  final.doesHit = false;
+  final.t = maxDistance;
+
+  for(uint i=0; i<sceneInfo.spheresTotal; i++){
+    HitRecord current = hitSphere(sceneInfo.spheres[i], ray, tMin, final.t);
+    if(current.doesHit){ 
+      final = current;
+    }
+  }
+  return final;
+}
+
+HitRecord hitSphere(Sphere sphere, Ray ray, float tMin, float tMax){
+  HitRecord hitRecord;
+  const vec3 oc = sphere.center - ray.origin;
+  const float a = dot(ray.direction, ray.direction);
+  const float h = dot(ray.direction, oc);
+  const float c = dot(oc, oc) - sphere.radius * sphere.radius;
+  const float discrimant = h*h  - a*c;
+
+  if(discrimant < 0){
+    hitRecord.doesHit = false;
+    return hitRecord;
+  } 
+  
+  const float sqrtd = sqrt(discrimant);
+  const float t1 = (h - sqrtd) / a;
+  const float t2 = (h + sqrtd) / a;
+ 
+  float t;
+  if(t1 > tMin && t1 < tMax){
+    if(t2 > tMin && t2 < t1)
+      t = t2;
+    else
+      t = t1;
+  }
+  else if (t2 > tMin && t2 < tMax){
+    t = t2;
+  }
+  else{
+    hitRecord.doesHit = false;
+    return hitRecord;
+  }
+  
+  hitRecord.doesHit = true;
+  hitRecord.t = t;
+  hitRecord.hitPoint = rayAt(ray,t);
+  hitRecord.outNormal = normalize(hitRecord.hitPoint - sphere.center);
+  return hitRecord;
+}
+
+ScatterRecord scatter(HitRecord hitRecord, Ray ray){
+  ScatterRecord scatterRecord;
+  scatterRecord.doesScatter = true;
+  vec3 scatterDirection = hitRecord.outNormal + randomUnitVector();
+
+  if(isVectorNearZero(scatterDirection)){
+    scatterDirection = hitRecord.outNormal;
+  }
+
+  scatterRecord.direction = scatterDirection;
+
+  return scatterRecord;
+}
+
+
+bool isVectorNearZero(vec3 vec) {
+  const float s = 1e-8;
+  return abs(vec.x) < s && abs(vec.y) < s && abs(vec.z) < s;
+}
+
+//random
+uint hash(uint x) {
+  x += (x << 10u);
+  x ^= (x >>  6u);
+  x += (x <<  3u);
+  x ^= (x >> 11u);
+  x += (x << 15u);
+  return x;
+}
+
+uint currentRandomOffset = 0;
+
+float random() {
+  currentRandomOffset += 1;
+  const uvec4 v = floatBitsToUint(vec4(gl_GlobalInvocationID.xy, renderCallInfo.samplesPerPixel, currentRandomOffset));
+
+  uint m = hash(v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w));
+  m &= 0x007FFFFFu;
+  m |= 0x3F800000u;
+  return uintBitsToFloat(m) - 1.0f;
+}
+
+float randomInInterval(float min, float max) {
+  return random() * (max - min) + min;
+}
+
+vec3 randomVector(float min, float max) {
+  return vec3(randomInInterval(min, max), randomInInterval(min, max), randomInInterval(min, max));
+}
+
+vec3 randomUnitVector() {
+  return normalize(randomVector(-1.0f, 1.0f));
 }

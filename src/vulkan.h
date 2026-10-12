@@ -37,7 +37,7 @@ struct SwapChainSupportDetails {
 //vulkan class
 class Vulkan{
   public:
-    Vulkan();
+    Vulkan(renderCallInfo rCallInfo, SceneInfo sceneInfo);
     ~Vulkan();
     
     void run();
@@ -76,9 +76,12 @@ class Vulkan{
     VkImageView storageImageView;
 
     renderCallInfo rInfo;
-    VkDeviceMemory uniformBufferMemory;
-    VkBuffer uniformBuffer;
-    
+    VkDeviceMemory rInfoBufferMemory;
+    VkBuffer rInfoBuffer;
+    SceneInfo sInfo;
+    VkDeviceMemory sInfoBufferMemory;
+    VkBuffer sInfoBuffer;
+
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
 
@@ -122,8 +125,7 @@ class Vulkan{
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void createStorageImageView();
 
-    void createUniformBuffer();
-    void updateUniformBuffer();
+    void createUniformBuffers();
 
     VkShaderModule createShaderModule(const std::vector<char>& code);
 
