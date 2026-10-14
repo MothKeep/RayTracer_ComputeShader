@@ -1,5 +1,4 @@
 # Vulkan compute shader Ray Tracer
----
 ![Raytracing image](cover.png)
 
 GPU-accelerated ray tracing renderer implemented in **C++ and Vulkan**, using compute shaders to perform ray generation, scene intersection, shading, and image output.
@@ -17,6 +16,7 @@ The renderer performs a single compute pass to generate a ray-traced image and p
 - GLFW window creation.
     
 - CMake-based build system.
+  
 ## Tech Stack
 
 - **C++17** - Program logic.
@@ -27,7 +27,7 @@ The renderer performs a single compute pass to generate a ray-traced image and p
     
 - **CMake** - Build configuration.
 
----
+
 ## Requirements
 
 - C++17-compatible compiler.
@@ -39,6 +39,7 @@ The renderer performs a single compute pass to generate a ray-traced image and p
 - Vulkan-compatible GPU and graphics drivers.
     
 - GLFW 3.x development package.
+
 ## Building
 
 #### Linux
